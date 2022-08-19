@@ -10,7 +10,6 @@ This project is fully written in the Taichi Language, you can use the following 
 
 ```bash
 python3 -m pip install taichi
-python3 -m pip install taichi_glsl
 ```
 
 The simulator kernels `{fluid_simulator.py|ferrofluid_simulator.py}` are designed dimensionality independent thanks to the features of Taichi. To initialize the scene, you should provide an initializer to the simulator, see `{initializer_2d.py|initializer_3d.py}` for details. Moreover, to visualize the result per frame, you should provide a visualizer, see `{visualizer_2d.py|visualizer_3d.py}` for details. You can see the examples demonstrated in `{main_2d.py|main_3d.py}`.

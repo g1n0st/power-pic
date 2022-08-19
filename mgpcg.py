@@ -26,7 +26,7 @@ class MGPCGPoissonSolver:
                         for l in range(self.n_mg_levels)] # M^-1 self.r
 
         # grid type
-        self.grid_type = [ti.field(dtype=ti.i8, shape=[res[_] // 2**l for _ in range(dim)]) 
+        self.grid_type = [ti.field(dtype=ti.i32, shape=[res[_] // 2**l for _ in range(dim)]) 
                         for l in range(self.n_mg_levels)]
 
         # lhs of linear system and its corresponding form in coarse grids

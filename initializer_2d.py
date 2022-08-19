@@ -31,11 +31,12 @@ class Initializer2D:
 
 @ti.data_oriented
 class SphereInitializer2D:
-    def __init__(self, res, x0, y0, r):
+    def __init__(self, res, x0, y0, r, free_surface=True):
         self.res = res
         self.x0 = int(res * x0)
         self.y0 = int(res * y0)
         self.r = int(res * r)
+        self.free_surface = free_surface
 
     @ti.kernel
     def init_kernel(self, cell_type : ti.template()):
@@ -43,7 +44,17 @@ class SphereInitializer2D:
             if (i - self.x0) ** 2 + (j - self.y0) ** 2 <= self.r ** 2:
                 cell_type[i, j] = utils.FLUID
 
+    @ti.kernel
+    def init_kernel1(self, cell_type : ti.template(), u0 : ti.template()):
+        for i, j in cell_type:
+            cell_type[i, j] = utils.FLUID
+            if (i - self.x0) ** 2 + (j - self.y0) ** 2 <= self.r ** 2:
+                u0[i, j] = -40.0
+                u0[i, j+1] = -40.0
+
     def init_scene(self, simulator):
         simulator.level_set.initialize_with_sphere((self.x0 * simulator.dx, self.y0 * simulator.dx), self.r * simulator.dx)
-        self.init_kernel(simulator.cell_type)
-        
+        if self.free_surface:
+            self.init_kernel(simulator.cell_type)
+        else:
+            self.init_kernel1(simulator.cell_type, simulator.velocity[1])

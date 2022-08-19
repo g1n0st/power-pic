@@ -1,12 +1,10 @@
 import taichi as ti
-import taichi_glsl as ts
 
 import utils
 from utils import *
 from mgpcg import MGPCGPoissonSolver
 from pressure_project import PressureProjectStrategy
-from level_set import FastMarchingLevelSet, FastSweepingLevelSet
-from surface_tension import SurfaceTension
+from level_set import FastSweepingLevelSet
 from volume_control import PressureProjectWithVolumeControlStrategy
 
 from functools import reduce
@@ -67,7 +65,7 @@ class FluidSimulator:
         self.p_x = ti.Vector.field(dim, dtype=real) # positions
         
         indices = ti.ijk if self.dim == 3 else ti.ij
-        max_particles = reduce(lambda x, y : x * y, res) * (2 ** dim)
+        max_particles = reduce(lambda x, y : x * y, res) * (4 ** dim)
         ti.root.dense(ti.i, max_particles).place(self.p_x)
 
         ti.root.dense(indices, res).place(self.cell_type, self.pressure)
@@ -76,24 +74,17 @@ class FluidSimulator:
             ti.root.dense(indices, [res[_] + (d == _) for _ in range(self.dim)]).place(self.velocity[d], self.velocity_backup[d])
         
         # Level-Set
-        self.loop_order = FAST_SWEEPING_METHOD
-        if self.loop_order == FAST_SWEEPING_METHOD:
-            self.level_set = FastSweepingLevelSet(self.dim, 
-                                  self.res, 
-                                  self.dx, 
-                                  self.real)
-        else:
-            self.level_set = FastMarchingLevelSet(self.dim, 
-                                  self.res, 
-                                  self.dx, 
-                                  self.real)
+        self.level_set = FastSweepingLevelSet(self.dim, 
+                                self.res, 
+                                self.dx, 
+                                self.real)
 
         # MGPCG
         self.n_mg_levels = 4
         self.pre_and_post_smoothing = 2
         self.bottom_smoothing = 10
-        self.iterations = 500
-        self.verbose = True
+        self.iterations = 50
+        self.verbose = False
         self.poisson_solver = MGPCGPoissonSolver(self.dim, 
                                                  self.res, 
                                                  self.n_mg_levels,
@@ -102,22 +93,22 @@ class FluidSimulator:
                                                  self.real)
 
         # Pressure Solve
-        self.ghost_fluid_method = True # Gibou et al. [GFCK02]
-        self.strategy = PressureProjectStrategy(self.dim,
-                                                self.velocity,
-                                                self.ghost_fluid_method, 
-                                                self.level_set.phi, 
-                                                self.p0)
-        self.volume_control_stragtegy = PressureProjectWithVolumeControlStrategy(self.dim,
-                                                                                 self.velocity,
-                                                                                 self.ghost_fluid_method, 
-                                                                                 self.level_set.phi, 
-                                                                                 self.p0,
-                                                                                 self.level_set,
-                                                                                 self.dt) # [Losasso et al. 2008]
-
-        # capillary surface tension [Zheng et al. 2006]
-        self.surface_tension = SurfaceTension(simulator = self)
+        self.ghost_fluid_method = False # Gibou et al. [GFCK02]
+        self.volume_control = False
+        if self.volume_control:
+            self.strategy = PressureProjectWithVolumeControlStrategy(self.dim,
+                                                                     self.velocity,
+                                                                     self.ghost_fluid_method, 
+                                                                     self.level_set.phi, 
+                                                                     self.p0,
+                                                                     self.level_set,
+                                                                     self.dt) # [Losasso et al. 2008]
+        else:
+            self.strategy = PressureProjectStrategy(self.dim,
+                                                    self.velocity,
+                                                    self.ghost_fluid_method, 
+                                                    self.level_set.phi, 
+                                                    self.p0)
 
     @ti.func
     def is_valid(self, I):
@@ -287,18 +278,6 @@ class FluidSimulator:
             print(f'\033[36mMax advect velocity: {mks}\033[0m')
         
     def end_substep(self, dt):
-        # Apply the capillary surface tension on the interface using a semi-implicit method
-        self.surface_tension.solve_surface_tension()
-        self.extrap_velocity()
-        self.enforce_boundary()
-       
-        # Apply another projection step to enforce the divergence-free condition for the final state
-        self.solve_pressure(dt, self.volume_control_stragtegy) # with a volume correction term
-        if self.verbose:
-            prs = np.max(self.pressure.to_numpy())
-            print(f'\033[36mMax pressure: {prs}\033[0m')
-        self.apply_pressure(dt)
-
         self.extrap_velocity()
         self.enforce_boundary()
 

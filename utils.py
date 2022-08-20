@@ -31,7 +31,7 @@ def sample(data, pos):
             (data[i, jp, kp] * (1 - s) + data[ip, jp, kp] * s) * t) * u
 
 @ti.func
-def splat(data, weights, v, pos):
+def splat_w(data, weights, v, pos, T0):
     tot = data.shape
     dim = ti.static(len(tot))
 
@@ -52,5 +52,9 @@ def splat(data, weights, v, pos):
             dpos[k] = (pos[k] - I0[k]) if u[k] == 0 else (pos[k] - I1[k])
             I[k] = I0[k] if u[k] == 0 else I1[k]
             W *= (1 - w[k]) if u[k] == 0 else w[k]
-        data[I] += v * W
-        weights[I] += W
+        data[I] += v * W * T0
+        weights[I] += W * T0
+
+@ti.func
+def splat(data, weights, v, pos):
+    splat_w(data, weights, v, pos, 1.0)

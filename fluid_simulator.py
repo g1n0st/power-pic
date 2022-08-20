@@ -11,7 +11,7 @@ from functools import reduce
 import time
 import numpy as np
 
-ti.init(arch=ti.cuda, kernel_profiler=True)
+ti.init(arch=ti.cuda, kernel_profiler=False, device_memory_GB=4.0)
 
 ADVECT_REDISTANCE = 0
 MARKERS = 1
@@ -64,14 +64,16 @@ class FluidSimulator:
         self.total_mk = ti.field(dtype=ti.i32, shape = ()) # total number of particles/markers
         self.p_x = ti.Vector.field(dim, dtype=real) # positions
         
-        indices = ti.ijk if self.dim == 3 else ti.ij
-        max_particles = reduce(lambda x, y : x * y, res) * (4 ** dim)
-        ti.root.dense(ti.i, max_particles).place(self.p_x)
+        self.indices = ti.ijk if self.dim == 3 else ti.ij
+        self.p_per_axis = 2
+        self.ppc = self.p_per_axis ** dim
+        self.max_particles = reduce(lambda x, y : x * y, res) * (4 ** dim)
+        ti.root.dense(ti.i, self.max_particles).place(self.p_x)
 
-        ti.root.dense(indices, res).place(self.cell_type, self.pressure)
-        ti.root.dense(indices, [res[_] + 1 for _ in range(self.dim)]).place(self.valid, self.valid_temp)
+        ti.root.dense(self.indices, res).place(self.cell_type, self.pressure)
+        ti.root.dense(self.indices, [res[_] + 1 for _ in range(self.dim)]).place(self.valid, self.valid_temp)
         for d in range(self.dim):
-            ti.root.dense(indices, [res[_] + (d == _) for _ in range(self.dim)]).place(self.velocity[d], self.velocity_backup[d])
+            ti.root.dense(self.indices, [res[_] + (d == _) for _ in range(self.dim)]).place(self.velocity[d], self.velocity_backup[d])
         
         # Level-Set
         self.level_set = FastSweepingLevelSet(self.dim, 
@@ -324,9 +326,9 @@ class FluidSimulator:
         self.total_mk[None] = 0
         for I in ti.grouped(self.cell_type):
             if self.cell_type[I] == utils.FLUID:
-                for offset in ti.static(ti.grouped(ti.ndrange(*((0, 2), ) * self.dim))):
+                for offset in ti.static(ti.grouped(ti.ndrange(*((0, self.p_per_axis), ) * self.dim))):
                     num = ti.atomic_add(self.total_mk[None], 1)
-                    self.p_x[num] = (I + (offset + [ti.random() for _ in ti.static(range(self.dim))]) / 2) * self.dx
+                    self.p_x[num] = (I + (offset + [ti.random() for _ in ti.static(range(self.dim))]) / self.p_per_axis) * self.dx
 
     @ti.kernel
     def reinitialize(self):

@@ -5,7 +5,6 @@ from fluid_simulator import FluidSimulator
 from utils import *
 import utils
 
-from functools import reduce
 import time
 import numpy as np
 
@@ -24,10 +23,9 @@ class FLIPSimulator(FluidSimulator):
         free_surface = True):
             super().__init__(dim, res, dt, substeps, dx, rho, gravity, p0, real)
             self.free_surface=free_surface
-            self.p_v = ti.Vector.field(dim, dtype=real) # velocities
-
-            max_particles = reduce(lambda x, y : x * y, res) * (4 ** dim)
-            ti.root.dense(ti.i, max_particles).place(self.p_v)
+            self.total_fluid = ti.field(ti.i32, shape=())
+            self.p_v = ti.Vector.field(dim, dtype=real, shape=self.max_particles) # velocities
+            self.color_p = ti.Vector.field(3, real, shape=self.max_particles) # random color for visualization
 
     @ti.kernel
     def p2g(self):
@@ -100,8 +98,10 @@ class FLIPSimulator(FluidSimulator):
         self.total_mk[None] = 0
         for I in ti.grouped(self.cell_type):
             if self.cell_type[I] == utils.FLUID:
-                for offset in ti.grouped(ti.ndrange(*((0, 2), ) * self.dim)):
+                self.total_fluid[None] += 1
+                for offset in ti.grouped(ti.ndrange(*((0, self.p_per_axis), ) * self.dim)):
                     num = ti.atomic_add(self.total_mk[None], 1)
-                    self.p_x[num] = (I + (offset + [ti.random() for _ in ti.static(range(self.dim))]) / 2) * self.dx
+                    self.p_x[num] = (I + (offset + [ti.random() for _ in ti.static(range(self.dim))]) / self.p_per_axis) * self.dx
                     self.p_v[num] = self.vel_interp(self.p_x[num])
+                    self.color_p[num] = ti.Vector([ti.random(), ti.random(), ti.random()])
 

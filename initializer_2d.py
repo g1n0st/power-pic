@@ -49,8 +49,8 @@ class SphereInitializer2D:
         for i, j in cell_type:
             cell_type[i, j] = utils.FLUID
             if (i - self.x0) ** 2 + (j - self.y0) ** 2 <= self.r ** 2:
-                u0[i, j] = -40.0
-                u0[i, j+1] = -40.0
+                u0[i, j] = -10.0
+                u0[i, j+1] = -10.0
 
     def init_scene(self, simulator):
         simulator.level_set.initialize_with_sphere((self.x0 * simulator.dx, self.y0 * simulator.dx), self.r * simulator.dx)

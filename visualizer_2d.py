@@ -8,6 +8,8 @@ class Visualizer2D:
     def __init__(self, grid_res, res):
         self.grid_res = grid_res
         self.res = res
+        self.tmp = ti.Vector.field(3, dtype=ti.f32, shape=(self.grid_res, self.grid_res))
+        self.tmp_w = ti.field(dtype=ti.f32, shape=(self.grid_res, self.grid_res))
         self.color_buffer = ti.Vector.field(3, dtype=ti.f32, shape=(self.res, self.res))
 
     @ti.func
@@ -16,12 +18,21 @@ class Visualizer2D:
                int((j + 0.5) / self.res * self.grid_res)
 
     @ti.kernel
-    def fill_pressure(self, p : ti.template()):
+    def fill_power(self, sim : ti.template()):
+        for i, j in self.tmp:
+            self.tmp[i, j].fill(0.0)
+            self.tmp_w[i, j] = 0.0
+        for p, i, j in sim.T:
+            base = (sim.p_x[p] / sim.dx).cast(ti.i32)
+            x, y = base[0] + (i - sim.R_2), base[1] + (j - sim.R_2)
+            if sim.is_valid(ti.Vector([x, y])):
+                self.tmp[x, y] += sim.T[p, i, j] * sim.color_p[p]
+                self.tmp_w[x, y] += sim.T[p, i, j]
+        
+        V_p = (1.0 / sim.total_mk[None])
         for i, j in self.color_buffer:
             x, y = self.ij_to_xy(i, j)
-
-            m = (ti.log(min(p[x, y], 1e6) + 1) / ti.log(10)) / 6
-            self.color_buffer[i, j] = ti.Vector([m, m, m])
+            self.color_buffer[i, j] = self.tmp[x, y] / self.tmp_w[x, y]
 
     @ti.kernel
     def fill_levelset(self, phi : ti.template(), dx : ti.template()):
@@ -45,8 +56,8 @@ class Visualizer2D:
                 self.color_buffer[i, j] = ti.Vector([1, 1, 1])
 
     def visualize_factory(self, simulator):
-        if self.mode == 'pressure':
-            self.fill_pressure(simulator.pressure)
+        if self.mode == 'power':
+            self.fill_power(simulator)
         elif self.mode == 'levelset':
             self.fill_levelset(simulator.level_set.phi, simulator.dx)
         elif self.mode == 'visual':
@@ -67,7 +78,7 @@ class GUIVisualizer2D(Visualizer2D):
     def visualize(self, simulator):
         self.canvas.set_background_color(color=(0.0, 0.0, 0.0))
         if self.mode == 'p':
-            self.canvas.circles(simulator.p_x, 0.001, (1.0, 1.0, 1.0))
+            self.canvas.circles(simulator.p_x, 0.001, per_vertex_color=simulator.color_p)
         else:
             self.visualize_factory(simulator)
             self.canvas.set_image(self.color_buffer)

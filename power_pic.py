@@ -24,6 +24,7 @@ class PowerPICSimulator(FLIPSimulator):
             super().__init__(dim, res, dt, substeps, dx, rho, gravity, p0, real, free_surface)
             self.s_p = ti.field(real, shape=self.max_particles)
             self.sum_p = ti.field(real, shape=self.max_particles)
+            self.Z_p = ti.field(real, shape=self.max_particles) # log-domain Z=max{a[i]+b[i]}
             self.c_p = ti.Vector.field(2, real, shape=self.max_particles)
             self.u_p = ti.Vector.field(2, real, shape=self.max_particles)
             
@@ -31,21 +32,22 @@ class PowerPICSimulator(FLIPSimulator):
             self.t_dx = 1 / self.t_res[0]
             self.s_j = ti.field(real)
             self.sum_j = ti.field(real)
-            ti.root.dense(self.indices, self.t_res).place(self.s_j, self.sum_j)
+            self.Z_j = ti.field(real) # log-domain Z=max{a[i]+b[i]}
+            ti.root.dense(self.indices, self.t_res).place(self.s_j, self.sum_j, self.Z_j)
+
+            self.entropy_eps = 2 * (self.t_dx ** 2)
+            self.sinkhorn_delta = 0.1
+            self.V_j = self.t_dx ** self.dim
 
             self.R = 16
             self.R_2 = self.R // 2
 
             self.T = ti.field(real, shape=(self.max_particles, self.R, self.R))
             self.K = ti.field(real, shape=(self.max_particles, self.R, self.R))
-
-            self.entropy_eps = 1e-4
-            self.sinkhorn_delta = 0.1
-            self.V_j = self.t_dx ** self.dim
     
     @ti.func
     def K_pj(self, x_p, x_j):
-        return ti.math.exp(-(x_p - x_j).norm_sqr() / self.entropy_eps)
+        return -(x_p - x_j).norm_sqr() / self.entropy_eps
     
     @ti.func
     def check_Tg(self, I):
@@ -60,23 +62,23 @@ class PowerPICSimulator(FLIPSimulator):
 
     @ti.kernel
     def init_sinkhorn_algo(self):
-        for p in self.s_p: self.s_p[p] = 1.0
+        for p in self.s_p: self.s_p[p] = 0.0
         for I in ti.grouped(self.s_j): 
             if self.check_Tg(I):
-                self.s_j[I] = 1.0
+                self.s_j[I] = 0.0
         for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
             x, y, pos = self.get_base(p, i, j)
             if self.check_Tg(ti.Vector([x, y])):
                 self.K[p, i, j] = self.K_pj(self.p_x[p], pos)
             else:
-                self.K[p, i, j] = 0
+                self.K[p, i, j] = 0.0
 
     @ti.kernel
     def calc_max_sum_j(self) -> ti.f32:
         for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
             x, y, pos = self.get_base(p, i, j)
             if self.check_Tg(ti.Vector([x, y])):
-                self.T[p, i, j] = self.K[p, i, j] * self.s_p[p] * self.s_j[x, y]
+                self.T[p, i, j] = ti.math.exp(self.K[p, i, j] + self.s_p[p] + self.s_j[x, y])
             else:
                 self.T[p, i, j] = 0
 
@@ -100,22 +102,35 @@ class PowerPICSimulator(FLIPSimulator):
         for I in ti.grouped(self.sum_j): 
             if self.check_Tg(I):
                 self.sum_j[I] = 0.0
+                self.Z_j[I] = -1e10
         for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
             x, y, pos = self.get_base(p, i, j)
             if self.check_Tg(ti.Vector([x, y])):
-                self.sum_j[x, y] += self.K[p, i, j] * self.s_p[p]
+                ti.atomic_max(self.Z_j[x, y], self.K[p, i, j] + self.s_p[p])
+        for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
+            x, y, pos = self.get_base(p, i, j)
+            if self.check_Tg(ti.Vector([x, y])):
+                self.sum_j[x, y] += ti.math.exp(self.K[p, i, j] + self.s_p[p] - self.Z_j[x, y])
+
         for I in ti.grouped(self.s_j):
             if self.check_Tg(I):
-                self.s_j[I] = self.V_j / self.sum_j[I]
+                self.s_j[I] = ti.math.log(self.V_j) - (self.Z_j[I] + ti.math.log(self.sum_j[I]))
 
 
-        for p in self.sum_p: self.sum_p[p] = 0.0
+        for p in self.sum_p: 
+            self.sum_p[p] = 0.0
+            self.Z_p[p] = -1e10
         for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
             x, y, pos = self.get_base(p, i, j)
             if self.check_Tg(ti.Vector([x, y])):
-                self.sum_p[p] += self.K[p, i, j] * self.s_j[x, y]
+                ti.atomic_max(self.Z_p[p], self.K[p, i, j] + self.s_j[x, y])
+        for p, i, j in ti.ndrange(self.total_mk[None], self.R, self.R):
+            x, y, pos = self.get_base(p, i, j)
+            if self.check_Tg(ti.Vector([x, y])):
+                self.sum_p[p] += ti.math.exp(self.K[p, i, j] + self.s_j[x, y] - self.Z_p[p])
+
         for p in self.s_p:
-            self.s_p[p] = V_p / self.sum_p[p]
+            self.s_p[p] = ti.math.log(V_p) - (self.Z_p[p] + ti.math.log(self.sum_p[p]))
 
     @ti.kernel
     def p2g(self):

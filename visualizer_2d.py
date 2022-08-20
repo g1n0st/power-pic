@@ -23,9 +23,8 @@ class Visualizer2D:
             self.tmp[i, j].fill(0.0)
             self.tmp_w[i, j] = 0.0
         for p, i, j in sim.T:
-            base = (sim.p_x[p] / sim.dx).cast(ti.i32)
-            x, y = base[0] + (i - sim.R_2), base[1] + (j - sim.R_2)
-            if sim.is_valid(ti.Vector([x, y])):
+            x, y, pos = sim.get_base(p, i, j)
+            if sim.check_Tg(ti.Vector([x, y])):
                 self.tmp[x, y] += sim.T[p, i, j] * sim.color_p[p]
                 self.tmp_w[x, y] += sim.T[p, i, j]
         
@@ -34,34 +33,9 @@ class Visualizer2D:
             x, y = self.ij_to_xy(i, j)
             self.color_buffer[i, j] = self.tmp[x, y] / self.tmp_w[x, y]
 
-    @ti.kernel
-    def fill_levelset(self, phi : ti.template(), dx : ti.template()):
-        for i, j in self.color_buffer:
-            x, y = self.ij_to_xy(i, j)
-
-            p = min(phi[x, y] / (dx * self.grid_res) * 1e2, 1)
-            if p > 0: self.color_buffer[i, j] = ti.Vector([p, 0, 0])
-            else: self.color_buffer[i, j] = ti.Vector([0, 0, -p])
-
-    @ti.kernel
-    def visualize_kernel(self, phi : ti.template(), cell_type : ti.template()):
-        for i, j in self.color_buffer:
-            x, y = self.ij_to_xy(i, j)
-
-            if cell_type[x, y] == utils.SOLID: 
-                self.color_buffer[i, j] = ti.Vector([0, 0, 0])
-            elif phi[x, y] <= 0: 
-                self.color_buffer[i, j] = ti.Vector([113 / 255, 131 / 255, 247 / 255]) # fluid
-            else: 
-                self.color_buffer[i, j] = ti.Vector([1, 1, 1])
-
     def visualize_factory(self, simulator):
         if self.mode == 'power':
             self.fill_power(simulator)
-        elif self.mode == 'levelset':
-            self.fill_levelset(simulator.level_set.phi, simulator.dx)
-        elif self.mode == 'visual':
-            self.visualize_kernel(simulator.level_set.phi, simulator.cell_type)
 
     def visualize(self, simulator):
         assert 0, 'Please use GUIVisualizer2D'

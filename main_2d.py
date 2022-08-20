@@ -28,6 +28,6 @@ if __name__ == '__main__':
                             free_surface=fs)
 
     
-    visualizer = GUIVisualizer2D(args.res, 512, args.show, export= "results" if args.save else "")
+    visualizer = GUIVisualizer2D(args.res if args.flip else args.t_res, 512, args.show, export= "results" if args.save else "")
     solver.initialize(initializer)
     solver.run(24 * 60 if args.save else -1, visualizer)

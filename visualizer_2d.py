@@ -65,22 +65,38 @@ class Visualizer2D:
 
     def visualize(self, simulator):
         assert 0, 'Please use GUIVisualizer2D'
+    
+    def end(self):
+        pass
 
 @ti.data_oriented
 class GUIVisualizer2D(Visualizer2D):
-    def __init__(self, grid_res, res, mode, title = 'demo'):
+    def __init__(self, grid_res, res, mode, title = 'demo', export=""):
         super().__init__(grid_res, res)
         self.mode = mode
-        self.window = ti.ui.Window(title, (res, res))
+        self.window = ti.ui.Window(title, (res, res), vsync=True)
         self.canvas = self.window.get_canvas()
         self.frame = 0
+        self.export = False
+        if export != "":
+            self.export = True
+            self.video_manager = ti.tools.VideoManager(export)
 
     def visualize(self, simulator):
         self.canvas.set_background_color(color=(0.0, 0.0, 0.0))
         if self.mode == 'p':
-            self.canvas.circles(simulator.p_x, 0.001, per_vertex_color=simulator.color_p)
+            self.canvas.circles(simulator.p_x, 0.002, per_vertex_color=simulator.color_p)
         else:
             self.visualize_factory(simulator)
             self.canvas.set_image(self.color_buffer)
+        
+        if self.export:
+            img = self.window.get_image_buffer_as_numpy()
+            self.video_manager.write_frame(img)
+
         self.window.show()
         self.frame += 1
+    
+    def end(self):
+        if self.export:
+            self.video_manager.make_video(gif=True, mp4=True)

@@ -314,6 +314,8 @@ class FluidSimulator:
                 self.substep(self.dt)
             visualizer.visualize(self)
             step += 1
+        
+        visualizer.end()
 
     @ti.kernel
     def init_boundary(self):

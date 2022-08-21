@@ -22,12 +22,12 @@ class Visualizer2D:
         for i, j in self.tmp:
             self.tmp[i, j].fill(0.0)
             self.tmp_w[i, j] = 0.0
-        for p, i, j in ti.ndrange(sim.total_mk[None], sim.R, sim.R):
-            x, y, pos = sim.get_base(p, i, j)
-            if sim.check_Tg(ti.Vector([x, y])):
-                T = sim.T(p, x, y)
-                self.tmp[x, y] += T * sim.color_p[p]
-                self.tmp_w[x, y] += T
+        for I in ti.grouped(ti.ndrange(sim.total_mk[None], *(sim.R, ) * sim.dim)):
+            p, I_x, pos = self.get_base(I)
+            if self.check_Tg(I_x):
+                T = sim.T(p, I_x)
+                self.tmp[I_x] += T * sim.color_p[p]
+                self.tmp_w[I_x] += T
         
         V_p = (1.0 / sim.total_mk[None])
         for i, j in self.color_buffer:

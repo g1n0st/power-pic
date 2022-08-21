@@ -1,4 +1,3 @@
-from re import L
 import taichi as ti
 
 from fluid_simulator import FluidSimulator
